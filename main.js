@@ -8,8 +8,8 @@ const { exec } = require('child_process');
 // Variables globales
 let mainWindow;
 let tray = null;
-let screenTimeData = {}; // Pour stocker le temps d'écran par application
-let configData = {}; // Pour stocker les paramètres de configuration
+let screenTimeData = [];  // Contient les données des processus, avec le temps
+let lastReportDate = '';  // Pour stocker la date du dernier fichier Excel généré
 
 // Fonction pour créer la fenêtre principale
 function createWindow() {
@@ -28,183 +28,110 @@ function createWindow() {
   });
 }
 
-// Charger la configuration depuis un fichier JSON
-function loadConfig() {
-  const configPath = path.join(os.homedir(), 'Desktop', 'TempsEcranData', 'config.json');
-  if (fs.existsSync(configPath)) {
-    try {
-      const rawData = fs.readFileSync(configPath, 'utf-8');
-      if (rawData.trim() === '') {
-        configData = {
-          excelPath: 'F:\\I162\\nomduexcel.xlsx',
-          blacklist: ['System', 'svchost.exe', 'explorer.exe', 'Idle']
-        };
-      } else {
-        configData = JSON.parse(rawData);
-      }
-      console.log('Configuration chargée :', configData);
-    } catch (error) {
-      console.error('Erreur lors du chargement des données de configuration :', error);
-      configData = {
-        excelPath: 'F:\\I162\\nomduexcel.xlsx',
-        blacklist: ['System', 'svchost.exe', 'explorer.exe', 'Idle']
-      };
-    }
-  } else {
-    configData = {
-      excelPath: 'F:\\I162\\nomduexcel.xlsx',
-      blacklist: ['System', 'svchost.exe', 'explorer.exe', 'Idle']
-    };
-  }
-}
-
-// Sauvegarder la configuration dans un fichier JSON
-function saveConfig() {
-  const configPath = path.join(os.homedir(), 'Desktop', 'TempsEcranData', 'config.json');
+// Fonction pour récupérer les données des processus en cours
+async function getScreenTimeData() {
   try {
-    fs.writeFileSync(configPath, JSON.stringify(configData, null, 2));
-    console.log('Configuration sauvegardée.');
-  } catch (err) {
-    console.error('Erreur lors de la sauvegarde de la configuration :', err);
-  }
-}
+    const psList = await import('ps-list'); // Cette ligne remplace require()
+    const processes = await psList.default();  // Utilisez .default() pour accéder à la fonction ps-list()
 
-// Fonction pour charger les données de temps d'écran depuis le fichier JSON
-function loadScreenTimeData() {
-  const dataPath = getDataFilePath();
-  if (fs.existsSync(dataPath)) {
-    try {
-      const rawData = fs.readFileSync(dataPath, 'utf-8');
-      if (rawData.trim() === '') {
-        screenTimeData = {};
-      } else {
-        screenTimeData = JSON.parse(rawData);
+    if (processes.length === 0) {
+      console.log('Aucun processus trouvé.');
+    }
+
+    processes.forEach(process => {
+      const { name, pid, started } = process;
+
+      console.log(`Nom: ${name}, PID: ${pid}, Date de démarrage: ${started}`);
+
+      if (started === undefined) {
+        console.warn(`Le processus ${name} (${pid}) n'a pas de date de démarrage définie.`);
       }
-      console.log('Données de temps d\'écran chargées :', screenTimeData);
-    } catch (error) {
-      console.error('Erreur lors du chargement des données de temps d\'écran :', error);
-      screenTimeData = {};
-    }
-  } else {
-    screenTimeData = {};
-  }
-}
 
-// Fonction pour sauvegarder les données de temps d'écran dans un fichier JSON
-function saveScreenTimeData() {
-  const dataPath = getDataFilePath();
-  try {
-    fs.writeFileSync(dataPath, JSON.stringify(screenTimeData, null, 2));
-    console.log('Données de temps d\'écran sauvegardées.');
-  } catch (err) {
-    console.error('Erreur lors de la sauvegarde des données de temps d\'écran :', err);
-  }
-}
+      const startTime = started !== undefined ? new Date(started).getTime() : Date.now();  
+      const currentTime = Date.now();
+      const elapsedTimeInSeconds = Math.floor((currentTime - startTime) / 1000);  
 
-// Fonction pour obtenir le chemin du fichier de données de temps d'écran
-function getDataFilePath() {
-  return path.join(os.homedir(), 'Desktop', 'TempsEcranData', 'screenTimeData.json');
-}
+      const existingProcess = screenTimeData.find(app => app.pid === pid);
 
-// Fonction pour vérifier et créer le dossier pour Excel si nécessaire
-function ensureExcelDirectoryExists() {
-  const excelDir = path.dirname(configData.excelPath);
-  if (!fs.existsSync(excelDir)) {
-    fs.mkdirSync(excelDir, { recursive: true });
-  }
-}
-
-// Fonction pour exporter les données dans un fichier Excel
-function exportToExcel() {
-  if (!isPathAccessible(configData.excelPath)) {
-    console.error('Le chemin spécifié pour l\'exportation Excel n\'est pas accessible:', configData.excelPath);
-    return;
-  }
-
-  ensureExcelDirectoryExists();
-
-  const workbook = new excelJS.Workbook();
-  const sheet = workbook.addWorksheet('Temps Écran');
-  const currentDate = new Date().toLocaleDateString();
-
-  sheet.columns = [
-    { header: 'Application', key: 'app', width: 30 },
-    { header: currentDate, key: 'time', width: 15 }
-  ];
-
-  for (const [app, data] of Object.entries(screenTimeData)) {
-    const hours = Math.floor(data.time / 3600);
-    const minutes = Math.floor((data.time % 3600) / 60);
-    const decimalTime = hours + minutes / 60;
-
-    if (!configData.blacklist.includes(app)) {
-      sheet.addRow({ app, time: decimalTime.toFixed(2) });
-    }
-  }
-
-  workbook.xlsx.writeFile(configData.excelPath).then(() => {
-    console.log('Données exportées dans le fichier Excel.');
-  }).catch(err => {
-    console.error('Erreur lors de l\'exportation des données vers Excel :', err);
-  });
-}
-
-// Fonction pour surveiller les applications en cours
-function trackScreenTime() {
-  exec('tasklist', (err, stdout, stderr) => {
-    if (err) {
-      console.error(`Erreur : ${stderr}`);
-      return;
-    }
-
-    const lines = stdout.split('\n');
-    lines.forEach(line => {
-      const parts = line.split(/\s+/);
-      if (parts.length > 1) {
-        const processName = parts[0];
-        if (processName !== 'Image' && !configData.blacklist.includes(processName)) {
-          const currentTime = Date.now();
-          if (!screenTimeData[processName]) {
-            screenTimeData[processName] = { time: 0, lastChecked: currentTime };
-          } else {
-            const deltaTime = (currentTime - screenTimeData[processName].lastChecked) / 1000;
-            screenTimeData[processName].time += deltaTime;
-          }
-          screenTimeData[processName].lastChecked = currentTime;
-        }
+      if (existingProcess) {
+        existingProcess.elapsedTime += 1;  
+      } else {
+        screenTimeData.push({
+          name,
+          pid,
+          elapsedTime: elapsedTimeInSeconds
+        });
       }
     });
 
-    saveScreenTimeData();
-  });
+    console.log('Données des processus mises à jour :', screenTimeData);
+
+    return screenTimeData;
+  } catch (error) {
+    console.error('Erreur lors de la récupération des données des processus:', error);
+    return [];
+  }
 }
 
-// Fonction pour configurer l'auto-démarrage
-function setupAutoLaunch() {
-  const AutoLaunch = require('auto-launch');
-  let autoLauncher = new AutoLaunch({
-    name: 'TempsEcran',
-    isHidden: true
-  });
+// Fonction pour créer un fichier Excel avec les données récupérées
+async function createExcelReport(data) {
+  try {
+    const workbook = new excelJS.Workbook();
+    const worksheet = workbook.addWorksheet('ScreenTimeData');
 
-  autoLauncher.isEnabled()
-    .then((isEnabled) => {
-      if (!isEnabled) {
-        autoLauncher.enable();
-      }
-    })
-    .catch((err) => {
-      console.error('Erreur AutoLaunch:', err);
+    worksheet.columns = [
+      { header: 'Application', key: 'name', width: 30 },
+      { header: 'Elapsed Time (seconds)', key: 'elapsedTime', width: 25 },
+    ];
+
+    data.forEach((app) => {
+      worksheet.addRow(app);
     });
+
+    // Chemin vers le dossier sur le bureau
+    const desktopPath = path.join(os.homedir(), 'Desktop');
+    const reportFolderPath = path.join(desktopPath, 'ScreenTimeReports');
+
+    // Vérifier si le dossier existe, sinon le créer
+    if (!fs.existsSync(reportFolderPath)) {
+      fs.mkdirSync(reportFolderPath);
+      console.log('Dossier "ScreenTimeReports" créé sur le bureau.');
+    }
+
+    // Créer un nom de fichier unique basé sur la date actuelle
+    const today = new Date();
+    const dateString = today.toISOString().split('T')[0];  // Format YYYY-MM-DD
+    const filePath = path.join(reportFolderPath, `ScreenTimeData_${dateString}.xlsx`);
+
+    await workbook.xlsx.writeFile(filePath);
+    console.log(`Données sauvegardées dans le fichier Excel à l'emplacement: ${filePath}`);
+  } catch (error) {
+    console.error('Erreur lors de la création du fichier Excel:', error);
+  }
 }
 
+// Fonction principale
+async function main() {
+  const today = new Date().toISOString().split('T')[0];  
+
+  if (today !== lastReportDate) {
+    console.log('Changement de date, création d\'un nouveau fichier Excel.');
+    lastReportDate = today;
+    screenTimeData = [];  
+
+    await createExcelReport(screenTimeData);
+  }
+
+  setInterval(async () => {
+    await getScreenTimeData();
+    await createExcelReport(screenTimeData);
+  }, 1000); 
+}
+
+// Appel de la fonction principale après le démarrage de l'application Electron
 app.on('ready', () => {
-  loadConfig(); 
-  loadScreenTimeData(); 
-
-  createWindow(); 
-
-  setInterval(trackScreenTime, 10000);
+  createWindow();
+  main();
 
   tray = new Tray(path.join(__dirname, 'tray-icon.png'));
   const contextMenu = Menu.buildFromTemplate([
@@ -212,8 +139,6 @@ app.on('ready', () => {
   ]);
   tray.setContextMenu(contextMenu);
   tray.setToolTip('Suivi du temps d\'écran');
-
-  setupAutoLaunch();
 });
 
 app.on('window-all-closed', () => {
@@ -222,13 +147,10 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Gestion des événements IPC
 ipcMain.handle('get-config', () => {
-  return configData; 
+  return {};  
 });
 
 ipcMain.handle('save-config', (event, newConfig) => {
-  configData = { ...configData, ...newConfig };
-  saveConfig();
-  return configData;
+  return newConfig;  
 });
