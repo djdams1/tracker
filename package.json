@@ -1,0 +1,23 @@
+{
+  "name": "temps",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "auto-launch": "^5.0.6",
+    "exceljs": "^4.4.0",
+    "xlsx": "^0.18.5"
+  }
+}

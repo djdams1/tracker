@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configurations Temps Écran</title>
+</head>
+<body>
+  <h1>Paramètres</h1>
+  <form id="config-form">
+    <label>
+      Nom du SSD :
+      <input type="text" id="ssd-name" />
+    </label><br><br>
+
+    <label>
+      Blacklist (séparée par des virgules) :
+      <input type="text" id="blacklist" />
+    </label><br><br>
+
+    <label>
+      Chemin du fichier Excel :
+      <input type="text" id="excel-path" />
+    </label><br><br>
+
+    <button type="submit">Sauvegarder</button>
+  </form>
+
+  <script>
+    // Importation du module ipcRenderer d'Electron pour la communication avec le main process
+    const { ipcRenderer } = require('electron');
+
+    const form = document.getElementById('config-form');
+    const ssdInput = document.getElementById('ssd-name');
+    const blacklistInput = document.getElementById('blacklist');
+    const excelPathInput = document.getElementById('excel-path');
+
+    // Charger les configurations existantes au démarrage
+    ipcRenderer.invoke('get-config').then((config) => {
+      ssdInput.value = config.ssdName;
+      blacklistInput.value = config.blacklist.join(', ');
+      excelPathInput.value = config.excelPath;
+    });
+
+    // Sauvegarder les configurations lorsque le formulaire est soumis
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      
+      const newConfig = {
+        ssdName: ssdInput.value,
+        blacklist: blacklistInput.value.split(',').map((item) => item.trim()),
+        excelPath: excelPathInput.value,
+      };
+      
+      ipcRenderer.send('save-config', newConfig);
+    });
+  </script>
+</body>
+</html>
